@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>COMP 6381 – Point Cloud Compression Evaluator</title>
+
+  <!--
+    Three.js r128 for the 3-D point cloud viewer.
+    No other dependencies — all UI is plain HTML/CSS/JS.
+  -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      font-size: 14px;
+      background: #0f1117;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Layout ───────────────────────────────────────────────────────────── */
+    header {
+      background: #1a1d27;
+      border-bottom: 1px solid #2a2d3e;
+      padding: 14px 24px;
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+    }
+    header h1 { font-size: 16px; font-weight: 600; color: #fff; }
+    header span { color: #6b7280; font-size: 12px; }
+
+    main {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 0;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ──────────────────────────────────────────────────────────── */
+    #sidebar {
+      background: #1a1d27;
+      border-right: 1px solid #2a2d3e;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #6b7280;
+      margin-bottom: 10px;
+    }
+
+    /* Upload zone */
+    #drop-zone {
+      border: 1.5px dashed #3a3d4e;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      color: #6b7280;
+    }
+    #drop-zone:hover, #drop-zone.drag-over {
+      border-color: #6366f1;
+      background: #1e203a;
+      color: #a5b4fc;
+    }
+    #drop-zone input[type="file"] { display: none; }
+    #drop-zone .icon { font-size: 28px; margin-bottom: 6px; }
+    #upload-status { margin-top: 8px; font-size: 12px; color: #22c55e; min-height: 16px; }
+
+    /* Controls */
+    label { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer; }
+    label input[type="checkbox"] { width: 14px; height: 14px; accent-color: #6366f1; }
+    label span { font-size: 13px; }
+
+    .param-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      padding-left: 22px;
+    }
+    .param-row span { color: #9ca3af; font-size: 12px; }
+    .param-row input[type="number"],
+    .param-row select {
+      width: 90px;
+      background: #0f1117;
+      border: 1px solid #2a2d3e;
+      border-radius: 4px;
+      color: #e0e0e0;
+      padding: 3px 6px;
+      font-size: 12px;
+    }
+
+    /* Codec checkboxes with QP selectors */
+    .codec-row {
+      margin-bottom: 10px;
+      padding: 8px 10px;
+      border: 1px solid #2a2d3e;
+      border-radius: 6px;
+      background: #0f1117;
+    }
+    .codec-row label { margin-bottom: 4px; }
+    .codec-params { padding-left: 22px; display: flex; flex-direction: column; gap: 4px; }
+    .codec-params .qp-item {
+      display: flex; align-items: center; gap: 6px; font-size: 12px; color: #9ca3af;
+    }
+    .codec-params .qp-item input[type="checkbox"] {
+      width: 12px; height: 12px; accent-color: #6366f1;
+    }
+
+    /* Buttons */
+    button {
+      width: 100%;
+      padding: 9px 14px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.15s, background 0.15s;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #btn-preprocess { background: #374151; color: #e0e0e0; margin-bottom: 8px; }
+    #btn-preprocess:hover:not(:disabled) { background: #4b5563; }
+    #btn-run { background: #6366f1; color: #fff; }
+    #btn-run:hover:not(:disabled) { background: #4f46e5; }
+
+    /* ── Main content area ────────────────────────────────────────────────── */
+    #content {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* 3-D viewers */
+    #viewers {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: #2a2d3e;
+      height: 50vh;
+      min-height: 280px;
+    }
+    .viewer-panel {
+      background: #0d1117;
+      position: relative;
+      overflow: hidden;
+    }
+    .viewer-label {
+      position: absolute;
+      top: 10px;
+      left: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #6b7280;
+      z-index: 10;
+      pointer-events: none;
+    }
+    .viewer-stats {
+      position: absolute;
+      bottom: 10px;
+      left: 12px;
+      font-size: 11px;
+      color: #4b5563;
+      z-index: 10;
+      pointer-events: none;
+    }
+    canvas { display: block; width: 100% !important; height: 100% !important; }
+
+    /* Results area */
+    #results-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    #log {
+      font-size: 12px;
+      color: #6b7280;
+      margin-bottom: 16px;
+      min-height: 20px;
+      font-family: monospace;
+    }
+
+    /* Results table */
+    #results-table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid #2a2d3e;
+      color: #6b7280;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #1a1d27;
+      white-space: nowrap;
+    }
+    tr:hover td { background: #1a1d27; }
+
+    /* Inline bar for bpp / PSNR columns */
+    .bar-cell { position: relative; }
+    .bar-bg {
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      background: #6366f120;
+      border-radius: 2px;
+      z-index: 0;
+    }
+    .bar-cell span { position: relative; z-index: 1; }
+
+    /* Codec badge */
+    .badge {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+    .badge-gpcc { background: #164e63; color: #67e8f9; }
+    .badge-draco { background: #14532d; color: #86efac; }
+
+    /* Empty state */
+    #empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #374151;
+      gap: 8px;
+    }
+    #empty-state .big { font-size: 36px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Point Cloud Compression Evaluator</h1>
+  <span>COMP 6381</span>
+</header>
+
+<main>
+  <!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+  <aside id="sidebar">
+
+    <!-- 1. Upload -->
+    <section>
+      <div class="section-title">1 · Upload PLY File(s)</div>
+      <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <div class="icon">📂</div>
+        <div>Click to select or drag &amp; drop</div>
+        <div style="font-size:11px; margin-top:4px;">One file = single frame &nbsp;|&nbsp; Multiple = sequence</div>
+        <input type="file" id="file-input" accept=".ply" multiple>
+      </div>
+      <div id="upload-status"></div>
+    </section>
+
+    <!-- 2. Preprocessing -->
+    <section>
+      <div class="section-title">2 · Preprocessing</div>
+
+      <label>
+        <input type="checkbox" id="chk-normalize" checked>
+        <span>Geometric normalisation</span>
+      </label>
+      <div class="param-row" id="p-normalize">
+        <span>Target range</span>
+        <input type="number" id="val-range" value="1.0" step="0.1" min="0.1">
+      </div>
+      <div class="param-row" id="p-pca">
+        <span>PCA alignment</span>
+        <input type="checkbox" id="chk-pca" checked style="width:14px;height:14px;accent-color:#6366f1">
+      </div>
+
+      <label>
+        <input type="checkbox" id="chk-density">
+        <span>Density regularisation</span>
+      </label>
+      <div class="param-row" id="p-density">
+        <span>Strategy</span>
+        <select id="sel-density">
+          <option value="voxel">Voxel grid</option>
+          <option value="radius">Radius (Poisson)</option>
+        </select>
+      </div>
+      <div class="param-row" id="p-voxel">
+        <span>Voxel size</span>
+        <input type="number" id="val-voxel" value="0.025" step="0.005" min="0.001">
+      </div>
+      <div class="param-row" id="p-radius" style="display:none">
+        <span>Radius</span>
+        <input type="number" id="val-radius" value="0.025" step="0.005" min="0.001">
+      </div>
+
+      <label>
+        <input type="checkbox" id="chk-smooth">
+        <span>MLS smoothing</span>
+      </label>
+      <div class="param-row" id="p-smooth">
+        <span>Radius</span>
+        <input type="number" id="val-mls-radius" value="0.05" step="0.01" min="0.01">
+      </div>
+      <div class="param-row" id="p-smooth2">
+        <span>Iterations</span>
+        <input type="number" id="val-mls-iter" value="1" min="1" max="5">
+      </div>
+
+      <button id="btn-preprocess" disabled>Preview Preprocessing</button>
+    </section>
+
+    <!-- 3. Codecs -->
+    <section>
+      <div class="section-title">3 · Compression Algorithms</div>
+
+      <!-- G-PCC -->
+      <div class="codec-row">
+        <label>
+          <input type="checkbox" id="chk-gpcc">
+          <span>G-PCC &nbsp;<small style="color:#67e8f9">(tmc3 / octree)</small></span>
+        </label>
+        <div class="codec-params" id="gpcc-params">
+          <div style="font-size:11px; color:#6b7280; margin-bottom:4px;">
+            positionQuantizationScale — larger = better quality:
+          </div>
+          <label class="qp-item"><input type="checkbox" class="gpcc-qp" value="4"> qscale=4 &nbsp;(coarse)</label>
+          <label class="qp-item"><input type="checkbox" class="gpcc-qp" value="8" checked> qscale=8 &nbsp;(medium)</label>
+          <label class="qp-item"><input type="checkbox" class="gpcc-qp" value="16"> qscale=16 &nbsp;(fine)</label>
+        </div>
+      </div>
+
+      <!-- Draco -->
+      <div class="codec-row">
+        <label>
+          <input type="checkbox" id="chk-draco" checked>
+          <span>Draco &nbsp;<small style="color:#86efac">(Google / KD-tree)</small></span>
+        </label>
+        <div class="codec-params" id="draco-params">
+          <div style="font-size:11px; color:#6b7280; margin-bottom:4px;">
+            Position quantisation bits — higher = better quality:
+          </div>
+          <label class="qp-item"><input type="checkbox" class="draco-qp" value="8"> qp=8 &nbsp;(low)</label>
+          <label class="qp-item"><input type="checkbox" class="draco-qp" value="11" checked> qp=11 &nbsp;(medium)</label>
+          <label class="qp-item"><input type="checkbox" class="draco-qp" value="14"> qp=14 &nbsp;(fine)</label>
+          <label class="qp-item"><input type="checkbox" class="draco-qp" value="18"> qp=18 &nbsp;(very fine)</label>
+        </div>
+      </div>
+
+      <button id="btn-run" disabled>Run Compression</button>
+    </section>
+
+  </aside>
+
+  <!-- ── Main content ──────────────────────────────────────────────────────── -->
+  <section id="content">
+
+    <!-- Before / After 3-D viewers -->
+    <div id="viewers">
+      <div class="viewer-panel" id="viewer-before">
+        <div class="viewer-label">Before preprocessing</div>
+        <div class="viewer-stats" id="stats-before">—</div>
+      </div>
+      <div class="viewer-panel" id="viewer-after">
+        <div class="viewer-label">After preprocessing</div>
+        <div class="viewer-stats" id="stats-after">—</div>
+        <div class="viewer-stats" id="stats-after-detail" style="bottom:26px;color:#22c55e;"></div>
+      </div>
+    </div>
+
+    <!-- Log + Results -->
+    <div id="results-area">
+      <div id="log">Upload a PLY file to get started.</div>
+
+      <div id="results-table-wrap">
+        <div id="empty-state">
+          <div class="big">📊</div>
+          <div>Results will appear here after compression runs.</div>
+        </div>
+        <table id="results-table" style="display:none">
+          <thead>
+            <tr>
+              <th>Codec</th>
+              <th>Params</th>
+              <th>bpp ↓</th>
+              <th>D1 PSNR ↑</th>
+              <th>D2 PSNR ↑</th>
+              <th>TFI ↓</th>
+              <th>Consistency ↑</th>
+              <th>Encode (s)</th>
+            </tr>
+          </thead>
+          <tbody id="results-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+
+let jobId       = null;
+let viewers     = {};   // { before: {scene,camera,renderer,...}, after: {...} }
+
+// ── Utility ───────────────────────────────────────────────────────────────────
+function log(msg) {
+  document.getElementById("log").textContent = msg;
+}
+
+function setDisabled(id, val) {
+  document.getElementById(id).disabled = val;
+}
+
+// ── Conditional parameter visibility ─────────────────────────────────────────
+function updateParamVisibility() {
+  const norm    = document.getElementById("chk-normalize").checked;
+  const density = document.getElementById("chk-density").checked;
+  const smooth  = document.getElementById("chk-smooth").checked;
+  const strategy = document.getElementById("sel-density").value;
+
+  ["p-normalize","p-pca"].forEach(id =>
+    document.getElementById(id).style.display = norm ? "" : "none");
+  ["p-density"].forEach(id =>
+    document.getElementById(id).style.display = density ? "" : "none");
+  document.getElementById("p-voxel").style.display =
+    (density && strategy === "voxel") ? "" : "none";
+  document.getElementById("p-radius").style.display =
+    (density && strategy === "radius") ? "" : "none";
+  ["p-smooth","p-smooth2"].forEach(id =>
+    document.getElementById(id).style.display = smooth ? "" : "none");
+}
+
+["chk-normalize","chk-density","chk-smooth","sel-density"].forEach(id =>
+  document.getElementById(id).addEventListener("change", updateParamVisibility));
+updateParamVisibility();
+
+//threejs viewer
+function createViewer(containerId) {
+  const container = document.getElementById(containerId);
+  const w = container.clientWidth  || 400;
+  const h = container.clientHeight || 300;
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(w, h);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setClearColor(0x0d1117);
+  container.appendChild(renderer.domElement);
+
+  const scene  = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, w / h, 0.001, 100);
+  camera.position.set(0, 0, 2.5);
+
+  // Simple orbit state
+  const orbit = { isDragging: false, lastX: 0, lastY: 0, theta: 0, phi: Math.PI/2, radius: 2.5 };
+
+  const canvas = renderer.domElement;
+  canvas.addEventListener("mousedown", e => {
+    orbit.isDragging = true;
+    orbit.lastX = e.clientX;
+    orbit.lastY = e.clientY;
+  });
+  window.addEventListener("mouseup",   () => { orbit.isDragging = false; });
+  window.addEventListener("mousemove", e => {
+    if (!orbit.isDragging) return;
+    const dx = e.clientX - orbit.lastX;
+    const dy = e.clientY - orbit.lastY;
+    orbit.theta -= dx * 0.005;
+    orbit.phi    = Math.max(0.1, Math.min(Math.PI - 0.1, orbit.phi - dy * 0.005));
+    orbit.lastX  = e.clientX;
+    orbit.lastY  = e.clientY;
+    updateCamera();
+  });
+  canvas.addEventListener("wheel", e => {
+    orbit.radius = Math.max(0.5, Math.min(10, orbit.radius + e.deltaY * 0.002));
+    updateCamera();
+  });
+
+  function updateCamera() {
+    camera.position.set(
+      orbit.radius * Math.sin(orbit.phi) * Math.sin(orbit.theta),
+      orbit.radius * Math.cos(orbit.phi),
+      orbit.radius * Math.sin(orbit.phi) * Math.cos(orbit.theta)
+    );
+    camera.lookAt(0, 0, 0);
+  }
+
+  (function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+  })();
+
+  const ro = new ResizeObserver(() => {
+    const w2 = container.clientWidth, h2 = container.clientHeight;
+    renderer.setSize(w2, h2);
+    camera.aspect = w2 / h2;
+    camera.updateProjectionMatrix();
+  });
+  ro.observe(container);
+
+  return { scene, camera, renderer, points: null, orbit, updateCamera };
+}
+
+viewers.before = createViewer("viewer-before");
+viewers.after  = createViewer("viewer-after");
+
+function loadPointCloud(viewerKey, pcData, statsId) {
+  const v = viewers[viewerKey];
+
+  // Remove old points
+  if (v.points) { v.scene.remove(v.points); v.points.geometry.dispose(); }
+
+  const n   = pcData.xyz.length;
+  const pos = new Float32Array(n * 3);
+  const col = new Float32Array(n * 3);
+
+  for (let i = 0; i < n; i++) {
+    pos[i*3]   = pcData.xyz[i][0];
+    pos[i*3+1] = pcData.xyz[i][1];
+    pos[i*3+2] = pcData.xyz[i][2];
+    if (pcData.rgb) {
+      col[i*3]   = pcData.rgb[i][0] / 255;
+      col[i*3+1] = pcData.rgb[i][1] / 255;
+      col[i*3+2] = pcData.rgb[i][2] / 255;
+    } else {
+      col[i*3] = 0.5; col[i*3+1] = 0.65; col[i*3+2] = 0.85;
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("color",    new THREE.BufferAttribute(col, 3));
+  geo.computeBoundingSphere();
+
+  const radius = geo.boundingSphere.radius || 1;
+  const scale  = 1.0 / radius;
+
+  const mat    = new THREE.PointsMaterial({ size: 0.008, vertexColors: true, sizeAttenuation: true });
+  v.points     = new THREE.Points(geo, mat);
+  v.points.scale.setScalar(scale);
+
+  const c = geo.boundingSphere.center;
+  v.points.position.set(-c.x * scale, -c.y * scale, -c.z * scale);
+
+  v.scene.add(v.points);
+
+  document.getElementById(statsId).textContent = `${n.toLocaleString()} points`;
+}
+
+const dropZone  = document.getElementById("drop-zone");
+const fileInput = document.getElementById("file-input");
+
+dropZone.addEventListener("dragover",  e => { e.preventDefault(); dropZone.classList.add("drag-over"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+dropZone.addEventListener("drop", e => {
+  e.preventDefault();
+  dropZone.classList.remove("drag-over");
+  uploadFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener("change", () => uploadFiles(fileInput.files));
+
+async function uploadFiles(files) {
+  if (!files.length) return;
+  log("Uploading…");
+
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f);
+
+  const resp = await fetch("/upload", { method: "POST", body: fd });
+  const data = await resp.json();
+
+  if (data.error) { log("Upload error: " + data.error); return; }
+
+  jobId = data.job_id;
+  document.getElementById("upload-status").textContent =
+    `✓ ${data.n_frames} frame(s) loaded · ${data.pts_frame.toLocaleString()} pts/frame`;
+
+  // Set parameter default
+    const r = Number.isFinite(data.coord_range) ? data.coord_range : 1.0;
+  document.getElementById("val-range").value = "1.0";
+  document.getElementById("val-voxel").value = Math.max(r * 0.005, 0.001).toFixed(4);
+  document.getElementById("val-radius").value = Math.max(r * 0.005, 0.001).toFixed(4);
+  document.getElementById("val-mls-radius").value = Math.max(r * 0.01, 0.001).toFixed(4);
+
+  loadPointCloud("before", data.preview, "stats-before");
+  document.getElementById("stats-after").textContent = "—";
+  document.getElementById("stats-after-detail").textContent = "";
+
+  setDisabled("btn-preprocess", false);
+  setDisabled("btn-run", false);
+  log("Ready. Optionally preview preprocessing, then run compression.");
+}
+
+document.getElementById("btn-preprocess").addEventListener("click", async () => {
+  if (!jobId) return;
+  log("Running preprocessing preview…");
+  setDisabled("btn-preprocess", true);
+
+  const body = buildPreprocessBody();
+  const resp = await fetch("/preprocess", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ job_id: jobId, ...body }),
+  });
+  const data = await resp.json();
+
+  if (data.error) { log("Preprocess error: " + data.error); setDisabled("btn-preprocess", false); return; }
+
+  loadPointCloud("before", data.before, "stats-before");
+  loadPointCloud("after",  data.after,  "stats-after");
+
+  document.getElementById("stats-before").textContent =
+    `${data.pts_before.toLocaleString()} points`;
+  document.getElementById("stats-after").textContent =
+    `${data.pts_after.toLocaleString()} points`;
+
+  const removed = Number.isFinite(data.pts_removed) ? data.pts_removed : Math.max(0, data.pts_before - data.pts_after);
+  const detail = removed > 0
+    ? `−${removed.toLocaleString()} pts removed (${(removed / data.pts_before * 100).toFixed(1)}%)`
+    : "no points removed";
+  document.getElementById("stats-after-detail").textContent = detail;
+
+  const summary = data.steps_applied.length
+    ? data.steps_applied.join(" → ")
+    : "no steps enabled";
+  log(`Preprocessing: ${summary}`);
+  setDisabled("btn-preprocess", false);
+});
+
+function buildPreprocessBody() {
+  return {
+    normalize:    document.getElementById("chk-normalize").checked,
+    target_range: parseFloat(document.getElementById("val-range").value),
+    pca_align:    document.getElementById("chk-pca").checked,
+    density:      document.getElementById("chk-density").checked
+                    ? document.getElementById("sel-density").value : null,
+    voxel_size:   parseFloat(document.getElementById("val-voxel").value),
+    radius:       parseFloat(document.getElementById("val-radius").value),
+    smooth:       document.getElementById("chk-smooth").checked,
+    mls_radius:   parseFloat(document.getElementById("val-mls-radius").value),
+    mls_degree:   1,
+    mls_iter:     parseInt(document.getElementById("val-mls-iter").value),
+  };
+}
+
+//start compression
+document.getElementById("btn-run").addEventListener("click", async () => {
+  if (!jobId) return;
+
+  const codecs = buildCodecList();
+  if (!codecs.length) { log("Select at least one codec and QP."); return; }
+
+  log("Starting compression…");
+  setDisabled("btn-run", true);
+
+  document.getElementById("results-body").innerHTML = "";
+  document.getElementById("results-table").style.display = "none";
+  document.getElementById("empty-state").style.display   = "none";
+
+  await fetch("/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ job_id: jobId, codecs: codecs }),
+  });
+
+//   const es = new EventSource(`/stream/${jobId}`);
+//   es.onmessage = e => {
+//     const ev = JSON.parse(e.data);
+//     if (ev.type === "progress") {
+//       log(ev.message);
+//     } else if (ev.type === "result") {
+//       addResultRow(ev);
+//       document.getElementById("results-table").style.display = "";
+//     } else if (ev.type === "done") {
+//       log("Done.");
+//       setDisabled("btn-run", false);
+//       es.close();
+//     } else if (ev.type === "error") {
+//       log("Error: " + ev.message);
+//       setDisabled("btn-run", false);
+//       es.close();
+//     }
+//   };
+  const es = new EventSource(`/stream/${jobId}`);
+
+  async function loadFinalResults() {
+    try {
+      const resp = await fetch(`/result/${jobId}`);
+      const data = await resp.json();
+
+      const tbody = document.getElementById("results-body");
+      tbody.innerHTML = "";
+
+      if (Array.isArray(data.results) && data.results.length > 0) {
+        data.results.forEach(addResultRow);
+        document.getElementById("results-table").style.display = "";
+        document.getElementById("empty-state").style.display = "none";
+        log("Done.");
+      } else {
+        log("Done, but no results were returned.");
+      }
+    } catch (err) {
+      log("Done, but failed to load final results: " + err);
+    } finally {
+      setDisabled("btn-run", false);
+    }
+  }
+
+  es.onmessage = async e => {
+    const ev = JSON.parse(e.data);
+
+    if (ev.type === "progress") {
+      log(ev.message);
+      return;
+    }
+
+    if (ev.type === "result") {
+      addResultRow(ev);
+      document.getElementById("results-table").style.display = "";
+      document.getElementById("empty-state").style.display = "none";
+      return;
+    }
+
+    if (ev.type === "done") {
+      es.close();
+      await loadFinalResults();
+      return;
+    }
+
+    if (ev.type === "error") {
+      log("Error: " + ev.message);
+      setDisabled("btn-run", false);
+      es.close();
+    }
+  };
+
+  es.onerror = async () => {
+    es.close();
+    await loadFinalResults();
+  };
+});
+
+function buildCodecList() {
+  const codecs = [];
+  if (document.getElementById("chk-gpcc").checked) {
+    document.querySelectorAll(".gpcc-qp:checked").forEach(cb => {
+      codecs.push({ name: "gpcc", position_qscale: parseInt(cb.value) });
+    });
+  }
+  if (document.getElementById("chk-draco").checked) {
+    document.querySelectorAll(".draco-qp:checked").forEach(cb => {
+      codecs.push({ name: "draco", qp: parseInt(cb.value), cl: 1 });
+    });
+  }
+  return codecs;
+}
+
+let maxBpp   = 0;
+let maxPsnr  = 0;
+
+function addResultRow(r) {
+  try {
+    maxBpp = Math.max(maxBpp, Number(r.bpp) || 0);
+    maxPsnr = Math.max(maxPsnr, Number(r.d1_psnr) || 0);
+
+    const tbody = document.getElementById("results-body");
+    const codec = String(r.codec || "").toLowerCase();
+
+    const badge = codec === "gpcc"
+      ? `<span class="badge badge-gpcc">G-PCC</span>`
+      : 
+      `<span class="badge badge-draco">Draco</span>`;
+
+    const params = Object.entries(r.params || {})
+      .map(([k, v]) => `${k}=${v}`).join(", ");
+
+    const bpp = Number.isFinite(r.bpp) ? r.bpp : "-";
+    const d1 = Number.isFinite(r.d1_psnr) ? r.d1_psnr : "-";
+    const d2 = Number.isFinite(r.d2_psnr) ? r.d2_psnr : "-";
+    const enc = Number.isFinite(r.encode_s) ? r.encode_s : "-";
+    const dec = Number.isFinite(r.decode_s) ? r.decode_s : "-";
+    const tfi = r.tfi ?? "-";
+    const consistency = r.consistency ?? "-";
+
+    const bppPct = maxBpp > 0 && Number.isFinite(r.bpp) ? (r.bpp / maxBpp * 100).toFixed(1) : 0;
+    const psnrPct = maxPsnr > 0 && Number.isFinite(r.d1_psnr) ? (r.d1_psnr / maxPsnr * 100).toFixed(1) : 0;
+
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${badge}</td>
+      <td style="color:#9ca3af">${params}</td>
+      <td class="bar-cell">
+        <div class="bar-bg" style="width:${bppPct}%"></div>
+        <span>${bpp}</span>
+      </td>
+      <td class="bar-cell">
+        <div class="bar-bg" style="width:${psnrPct}%"></div>
+        <span>${d1}${d1 !== "-" ? " dB" : ""}</span>
+      </td>
+      <td>${d2}${d2 !== "-" ? " dB" : ""}</td>
+      <td>${tfi}</td>
+      <td>${consistency}</td>
+      <td>${enc}s / ${dec}s</td>
+    `;
+    tbody.appendChild(row);
+  } catch (err) {
+    log("Failed to render result row: " + err);
+    console.error("Bad result row:", r, err);
+  }
+}
+</script>
+
+</body>
+</html>
